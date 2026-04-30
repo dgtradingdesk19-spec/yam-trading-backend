@@ -47,7 +47,8 @@ app.post("/trade", async (req, res) => {
       message: "Missing Coinbase API variables",
     });
   }
-
+console.log("LIVE_TRADING_ENABLED =", LIVE_TRADING_ENABLED);
+  
   if (!LIVE_TRADING_ENABLED) {
     return res.json({
       status: "SAFE MODE",
