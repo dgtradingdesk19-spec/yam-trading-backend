@@ -1,6 +1,7 @@
 import express from "express";
 import bodyParser from "body-parser";
-import { sign } from "jsonwebtoken";
+import jwt from "jsonwebtoken";
+const { sign } = jwt;
 import crypto from "crypto";
 
 const app = express();
