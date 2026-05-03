@@ -8,7 +8,7 @@ const app = express();
 app.use(bodyParser.json());
 
 const API_KEY = process.env.COINBASE_API_KEY;
-const API_SECRET = process.env.COINBASE_API_SECRET;
+const API_SECRET = process.env.COINBASE_API_SECRET?.replace(/\\n/g, "\n");
 const LIVE_TRADING_ENABLED = process.env.LIVE_TRADING_ENABLED === "true";
 
 function buildJwt(method, path) {
