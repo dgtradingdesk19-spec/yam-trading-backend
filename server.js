@@ -103,7 +103,7 @@ const orderBody = {
 if (cleanMode === "AWAY") {
   orderBody.attached_order_configuration.trigger_bracket_gtc.limit_price = cleanTargetPrice;
 }
-
+console.log("ORDER BODY SENT:", JSON.stringify(orderBody, null, 2));
   const coinbaseResponse = await fetch(`https://api.coinbase.com${requestPath}`, {
     method: "POST",
     headers: {
