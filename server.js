@@ -40,7 +40,7 @@ app.get("/", (req, res) => {
 
 app.post("/trade", async (req, res) => {
   const { investor, pair, side, price, qty } = req.body;
-
+console.log("PAIR RECEIVED:", pair);
   if (!API_KEY || !API_SECRET) {
     return res.status(500).json({
       status: "ERROR",
