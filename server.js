@@ -39,7 +39,7 @@ app.get("/", (req, res) => {
 });
 
 app.post("/trade", async (req, res) => {
-  const { investor, pair, side, price, qty } = req.body;
+  const { investor, pair, side, price, qty, mode, stopPrice, targetPrice } = req.body;
 console.log("PAIR RECEIVED:", pair);
   if (!API_KEY || !API_SECRET) {
     return res.status(500).json({
@@ -78,18 +78,31 @@ console.log("LIVE_TRADING_ENABLED =", LIVE_TRADING_ENABLED);
 
   const clientOrderId = crypto.randomUUID();
 
-  const orderBody = {
-    client_order_id: clientOrderId,
-    product_id: pair,
-    side: normalizedSide,
-    order_configuration: {
-      limit_limit_gtc: {
-        base_size: String(qty),
-        limit_price: String(price),
-        post_only: false,
-      },
+const cleanMode = String(mode || "NORMAL").trim().toUpperCase();
+const cleanStopPrice = String(stopPrice || "").trim();
+const cleanTargetPrice = String(targetPrice || "").trim();
+
+const orderBody = {
+  client_order_id: clientOrderId,
+  product_id: pair,
+  side: normalizedSide,
+  order_configuration: {
+    limit_limit_gtc: {
+      base_size: String(qty),
+      limit_price: String(price),
+      post_only: false,
     },
-  };
+  },
+  attached_order_configuration: {
+    trigger_bracket_gtc: {
+      stop_trigger_price: cleanStopPrice
+    }
+  }
+};
+
+if (cleanMode === "AWAY") {
+  orderBody.attached_order_configuration.trigger_bracket_gtc.limit_price = cleanTargetPrice;
+}
 
   const coinbaseResponse = await fetch(`https://api.coinbase.com${requestPath}`, {
     method: "POST",
