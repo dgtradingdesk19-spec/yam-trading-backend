@@ -124,6 +124,44 @@ console.log("ORDER BODY SENT:", JSON.stringify(orderBody, null, 2));
 });
 
 const port = process.env.PORT || 3000;
+app.post("/cancel", async (req, res) => {
+  try {
+    const { orderIds } = req.body;
+
+    if (!orderIds || !Array.isArray(orderIds) || orderIds.length === 0) {
+      return res.status(400).json({
+        status: "ERROR",
+        message: "No orderIds provided"
+      });
+    }
+
+    const requestPath = "/api/v3/brokerage/orders/batch_cancel";
+    const jwt = buildJwt("POST", requestPath);
+
+    const response = await fetch(`https://api.coinbase.com${requestPath}`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${jwt}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ order_ids: orderIds }),
+    });
+
+    const data = await response.json();
+
+    return res.json({
+      status: response.ok ? "CANCEL SENT" : "CANCEL ERROR",
+      httpStatus: response.status,
+      coinbaseData: data
+    });
+
+  } catch (err) {
+    return res.json({
+      status: "ERROR",
+      error: err.message
+    });
+  }
+});
 app.listen(port, () => {
   console.log(`Server running on port ${port}`);
 });
