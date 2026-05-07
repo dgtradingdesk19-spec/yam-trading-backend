@@ -7,7 +7,8 @@ import crypto from "crypto";
 const app = express();
 app.use(bodyParser.json());
 
-const LIVE_TRADING_ENABLED = process.env.LIVE_TRADING_ENABLED === "true";
+const LIVE_TRADING_ENABLED =
+  String(process.env.LIVE_TRADING_ENABLED).trim().toLowerCase() !== "false";
 
 function getInvestorCredentials(investor) {
   const name = String(investor || "").trim().toUpperCase();
