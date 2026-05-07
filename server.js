@@ -9,16 +9,28 @@ app.use(bodyParser.json());
 
 const LIVE_TRADING_ENABLED = process.env.LIVE_TRADING_ENABLED === "true";
 
-function normalizeInvestorName(investor) {
-  return String(investor || "")
-    .trim()
-    .toUpperCase()
-    .replace(/[^A-Z0-9]/g, "");
-}
-
 function getInvestorCredentials(investor) {
-  const name = normalizeInvestorName(investor);
+  const name = String(investor || "").trim().toUpperCase();
 
+  // ABA
+  if (name.includes("ABA")) {
+    return {
+      apiKey: process.env.ABA_API_KEY,
+      apiSecret: process.env.ABA_API_SECRET?.replace(/\\n/g, "\n"),
+      label: "ABA",
+    };
+  }
+
+  // ISAAC
+  if (name.includes("ISAAC")) {
+    return {
+      apiKey: process.env.ISAAC_API_KEY,
+      apiSecret: process.env.ISAAC_API_SECRET?.replace(/\\n/g, "\n"),
+      label: "ISAAC",
+    };
+  }
+
+  // AVISHAI
   if (name.includes("AVISHAI")) {
     return {
       apiKey: process.env.AVISHAI_API_KEY,
@@ -27,14 +39,7 @@ function getInvestorCredentials(investor) {
     };
   }
 
-  if (name.includes("ISAAC")) {
-    return {
-      apiKey: process.env.ISAAC_API_KEY || process.env.COINBASE_API_KEY,
-      apiSecret: (process.env.ISAAC_API_SECRET || process.env.COINBASE_API_SECRET)?.replace(/\\n/g, "\n"),
-      label: "ISAAC",
-    };
-  }
-
+  // DEFAULT
   return {
     apiKey: process.env.COINBASE_API_KEY,
     apiSecret: process.env.COINBASE_API_SECRET?.replace(/\\n/g, "\n"),
@@ -42,7 +47,7 @@ function getInvestorCredentials(investor) {
   };
 }
 
-function buildJwt(method, path, credentials) {
+function buildJwt(method, path, apiKey, apiSecret) {
   const requestHost = "api.coinbase.com";
   const uri = `${method} ${requestHost}${path}`;
 
@@ -51,14 +56,14 @@ function buildJwt(method, path, credentials) {
       iss: "cdp",
       nbf: Math.floor(Date.now() / 1000),
       exp: Math.floor(Date.now() / 1000) + 120,
-      sub: credentials.apiKey,
+      sub: apiKey,
       uri,
     },
-    credentials.apiSecret,
+    apiSecret,
     {
       algorithm: "ES256",
       header: {
-        kid: credentials.apiKey,
+        kid: apiKey,
         nonce: crypto.randomBytes(16).toString("hex"),
       },
     }
@@ -71,18 +76,31 @@ app.get("/", (req, res) => {
 
 app.post("/trade", async (req, res) => {
   try {
-    const { investor, pair, side, price, qty, mode, stopPrice, targetPrice } = req.body;
-    const credentials = getInvestorCredentials(investor);
+    const {
+      investor,
+      pair,
+      side,
+      price,
+      qty,
+      mode,
+      stopPrice,
+      targetPrice,
+    } = req.body;
 
-    console.log("INVESTOR RECEIVED:", investor);
-    console.log("INVESTOR ROUTED TO:", credentials.label);
+    const creds = getInvestorCredentials(investor);
+
+    const API_KEY = creds.apiKey;
+    const API_SECRET = creds.apiSecret;
+
+    console.log("INVESTOR ROUTED TO:", creds.label);
     console.log("PAIR RECEIVED:", pair);
     console.log("LIVE_TRADING_ENABLED =", LIVE_TRADING_ENABLED);
 
-    if (!credentials.apiKey || !credentials.apiSecret) {
+    if (!API_KEY || !API_SECRET) {
       return res.status(500).json({
         status: "ERROR",
-        message: "Missing Coinbase API variables for investor: " + credentials.label,
+        message: "Missing Coinbase API variables",
+        investorRoutedTo: creds.label,
       });
     }
 
@@ -90,14 +108,24 @@ app.post("/trade", async (req, res) => {
       return res.json({
         status: "SAFE MODE",
         message: "Backend connected, but live trading is disabled",
-        investorRoutedTo: credentials.label,
-        received: { investor, pair, side, price, qty, mode, stopPrice, targetPrice },
+        investorRoutedTo: creds.label,
+        received: {
+          investor,
+          pair,
+          side,
+          price,
+          qty,
+          mode,
+          stopPrice,
+          targetPrice,
+        },
       });
     }
 
     if (!pair || !side || !price || !qty) {
       return res.status(400).json({
         status: "ERROR",
+        investorRoutedTo: creds.label,
         message: "Missing pair, side, price, or qty",
       });
     }
@@ -107,15 +135,26 @@ app.post("/trade", async (req, res) => {
     if (!["BUY", "SELL"].includes(normalizedSide)) {
       return res.status(400).json({
         status: "ERROR",
+        investorRoutedTo: creds.label,
         message: "Side must be BUY or SELL",
       });
     }
 
     const requestPath = "/api/v3/brokerage/orders";
-    const authJwt = buildJwt("POST", requestPath, credentials);
+
+    const authJwt = buildJwt(
+      "POST",
+      requestPath,
+      API_KEY,
+      API_SECRET
+    );
+
     const clientOrderId = crypto.randomUUID();
 
-    const cleanMode = String(mode || "NORMAL").trim().toUpperCase();
+    const cleanMode = String(mode || "NORMAL")
+      .trim()
+      .toUpperCase();
+
     const cleanStopPrice = String(stopPrice || "").trim();
     const cleanTargetPrice = String(targetPrice || "").trim();
 
@@ -138,222 +177,37 @@ app.post("/trade", async (req, res) => {
     };
 
     if (cleanMode === "AWAY") {
-      orderBody.attached_order_configuration.trigger_bracket_gtc.limit_price = cleanTargetPrice;
+      orderBody.attached_order_configuration.trigger_bracket_gtc.limit_price =
+        cleanTargetPrice;
     }
 
-    console.log("ORDER BODY SENT:", JSON.stringify(orderBody, null, 2));
+    console.log(
+      "ORDER BODY SENT:",
+      JSON.stringify(orderBody, null, 2)
+    );
 
-    const coinbaseResponse = await fetch(`https://api.coinbase.com${requestPath}`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${authJwt}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(orderBody),
-    });
+    const coinbaseResponse = await fetch(
+      `https://api.coinbase.com${requestPath}`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${authJwt}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(orderBody),
+      }
+    );
 
     const coinbaseData = await coinbaseResponse.json();
 
     return res.json({
-      status: coinbaseResponse.ok ? "LIVE TRADE SENT" : "COINBASE ERROR",
-      investorRoutedTo: credentials.label,
+      status: coinbaseResponse.ok
+        ? "LIVE TRADE SENT"
+        : "COINBASE ERROR",
+      investorRoutedTo: creds.label,
       httpStatus: coinbaseResponse.status,
       clientOrderId,
       coinbaseData,
-    });
-  } catch (err) {
-    return res.json({
-      status: "ERROR",
-      error: err.message,
-    });
-  }
-});
-
-app.post("/cancel", async (req, res) => {
-  try {
-    const { investor, orderIds } = req.body;
-    const credentials = getInvestorCredentials(investor);
-
-    if (!orderIds || !Array.isArray(orderIds) || orderIds.length === 0) {
-      return res.status(400).json({
-        status: "ERROR",
-        message: "No orderIds provided",
-      });
-    }
-
-    if (!credentials.apiKey || !credentials.apiSecret) {
-      return res.status(500).json({
-        status: "ERROR",
-        message: "Missing Coinbase API variables for investor: " + credentials.label,
-      });
-    }
-
-    if (!LIVE_TRADING_ENABLED) {
-      return res.json({
-        status: "SAFE MODE",
-        message: "Live trading disabled",
-        investorRoutedTo: credentials.label,
-      });
-    }
-
-    const requestPath = "/api/v3/brokerage/orders/batch_cancel";
-    const authJwt = buildJwt("POST", requestPath, credentials);
-
-    const response = await fetch(`https://api.coinbase.com${requestPath}`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${authJwt}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ order_ids: orderIds }),
-    });
-
-    const data = await response.json();
-
-    return res.json({
-      status: response.ok ? "CANCEL SENT" : "CANCEL ERROR",
-      investorRoutedTo: credentials.label,
-      httpStatus: response.status,
-      coinbaseData: data,
-    });
-  } catch (err) {
-    return res.json({
-      status: "ERROR",
-      error: err.message,
-    });
-  }
-});
-
-app.post("/partial", async (req, res) => {
-  try {
-    const { investor, pair, qty } = req.body;
-    const credentials = getInvestorCredentials(investor);
-
-    if (!credentials.apiKey || !credentials.apiSecret) {
-      return res.status(500).json({
-        status: "ERROR",
-        message: "Missing Coinbase API variables for investor: " + credentials.label,
-      });
-    }
-
-    if (!LIVE_TRADING_ENABLED) {
-      return res.json({
-        status: "SAFE MODE",
-        message: "Live trading disabled",
-        investorRoutedTo: credentials.label,
-      });
-    }
-
-    if (!pair || !qty) {
-      return res.status(400).json({
-        status: "ERROR",
-        message: "Missing pair or qty",
-      });
-    }
-
-    const requestPath = "/api/v3/brokerage/orders";
-    const authJwt = buildJwt("POST", requestPath, credentials);
-
-    const orderBody = {
-      client_order_id: crypto.randomUUID(),
-      product_id: pair,
-      side: "SELL",
-      order_configuration: {
-        market_market_ioc: {
-          base_size: String(qty),
-        },
-      },
-    };
-
-    const response = await fetch(`https://api.coinbase.com${requestPath}`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${authJwt}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(orderBody),
-    });
-
-    const data = await response.json();
-
-    return res.json({
-      status: response.ok ? "PARTIAL SENT" : "PARTIAL ERROR",
-      investorRoutedTo: credentials.label,
-      httpStatus: response.status,
-      coinbaseData: data,
-    });
-  } catch (err) {
-    return res.json({
-      status: "ERROR",
-      error: err.message,
-    });
-  }
-});
-
-app.post("/breakeven", async (req, res) => {
-  try {
-    const { investor, pair, price, qty } = req.body;
-    const credentials = getInvestorCredentials(investor);
-
-    if (!credentials.apiKey || !credentials.apiSecret) {
-      return res.status(500).json({
-        status: "ERROR",
-        message: "Missing Coinbase API variables for investor: " + credentials.label,
-      });
-    }
-
-    if (!LIVE_TRADING_ENABLED) {
-      return res.json({
-        status: "SAFE MODE",
-        message: "Live trading disabled",
-        investorRoutedTo: credentials.label,
-      });
-    }
-
-    if (!pair || !price || !qty) {
-      return res.status(400).json({
-        status: "ERROR",
-        message: "Missing pair, price, or qty",
-      });
-    }
-
-    const requestPath = "/api/v3/brokerage/orders";
-    const authJwt = buildJwt("POST", requestPath, credentials);
-
-    const stopPrice = String(price);
-    const limitPrice = String((Number(price) * 0.995).toFixed(2));
-
-    const orderBody = {
-      client_order_id: crypto.randomUUID(),
-      product_id: pair,
-      side: "SELL",
-      order_configuration: {
-        stop_limit_stop_limit_gtc: {
-          base_size: String(qty),
-          stop_price: stopPrice,
-          limit_price: limitPrice,
-        },
-      },
-    };
-
-    const response = await fetch(`https://api.coinbase.com${requestPath}`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${authJwt}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(orderBody),
-    });
-
-    const data = await response.json();
-
-    return res.json({
-      status: response.ok ? "BREAKEVEN SENT" : "BREAKEVEN ERROR",
-      investorRoutedTo: credentials.label,
-      httpStatus: response.status,
-      stopPrice,
-      limitPrice,
-      coinbaseData: data,
     });
   } catch (err) {
     return res.json({
