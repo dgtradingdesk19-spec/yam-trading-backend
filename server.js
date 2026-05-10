@@ -7,36 +7,45 @@ import crypto from "crypto";
 const app = express();
 app.use(bodyParser.json());
 
+function cleanPrivateKey(value) {
+  return String(value || "")
+    .trim()
+    .replace(/^"+|"+$/g, "")
+    .replace(/^'+|'+$/g, "")
+    .replace(/\\n/g, "\n")
+    .trim();
+}
+
 function getInvestorCredentials(investor) {
   const name = String(investor || "").trim().toUpperCase();
 
   if (name.includes("ABA")) {
     return {
-      apiKey: process.env.ABA_API_KEY,
-      apiSecret: process.env.ABA_API_SECRET?.replace(/\\n/g, "\n"),
+      apiKey: String(process.env.ABA_API_KEY || "").trim().replace(/^"+|"+$/g, ""),
+      apiSecret: cleanPrivateKey(process.env.ABA_API_SECRET),
       label: "ABA",
     };
   }
 
   if (name.includes("ISAAC")) {
     return {
-      apiKey: process.env.ISAAC_API_KEY || process.env.COINBASE_API_KEY,
-      apiSecret: (process.env.ISAAC_API_SECRET || process.env.COINBASE_API_SECRET)?.replace(/\\n/g, "\n"),
+      apiKey: String(process.env.ISAAC_API_KEY || process.env.COINBASE_API_KEY || "").trim().replace(/^"+|"+$/g, ""),
+      apiSecret: cleanPrivateKey(process.env.ISAAC_API_SECRET || process.env.COINBASE_API_SECRET),
       label: "ISAAC",
     };
   }
 
   if (name.includes("AVISHAI")) {
     return {
-      apiKey: process.env.AVISHAI_API_KEY,
-      apiSecret: process.env.AVISHAI_API_SECRET?.replace(/\\n/g, "\n"),
+      apiKey: String(process.env.AVISHAI_API_KEY || "").trim().replace(/^"+|"+$/g, ""),
+      apiSecret: cleanPrivateKey(process.env.AVISHAI_API_SECRET),
       label: "AVISHAI",
     };
   }
 
   return {
-    apiKey: process.env.COINBASE_API_KEY,
-    apiSecret: process.env.COINBASE_API_SECRET?.replace(/\\n/g, "\n"),
+    apiKey: String(process.env.COINBASE_API_KEY || "").trim().replace(/^"+|"+$/g, ""),
+    apiSecret: cleanPrivateKey(process.env.COINBASE_API_SECRET),
     label: "DEFAULT",
   };
 }
@@ -75,10 +84,6 @@ app.post("/trade", async (req, res) => {
   try {
     const { investor, pair, side, price, qty, mode, stopPrice, targetPrice } = req.body;
     const credentials = getInvestorCredentials(investor);
-
-    console.log("INVESTOR RECEIVED:", investor);
-    console.log("INVESTOR ROUTED TO:", credentials.label);
-    console.log("PAIR RECEIVED:", pair);
 
     if (!credentials.apiKey || !credentials.apiSecret) {
       return res.status(500).json({
@@ -138,8 +143,6 @@ app.post("/trade", async (req, res) => {
         orderBody.attached_order_configuration.trigger_bracket_gtc.limit_price = cleanTargetPrice;
       }
     }
-
-    console.log("ORDER BODY SENT:", JSON.stringify(orderBody, null, 2));
 
     const coinbaseResponse = await fetch(`https://api.coinbase.com${requestPath}`, {
       method: "POST",
